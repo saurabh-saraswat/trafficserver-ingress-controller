@@ -35,7 +35,6 @@ spec:
     matchLabels:
       app: trafficserver-test
 
-  # DO NOT EXCEED ONE COPY
   replicas: 1
   # DO NOT EXCEED ONE COPY
   template:
@@ -46,14 +45,17 @@ spec:
 
       containers:
         - name: trafficserver-test
-          image: ats-ingress:latest # Needs to be updated
+          image: localhost:5000/ats-ingress-controller13 # Needs to be updated
           volumeMounts:
             - mountPath: "/etc/ats/ssl"
               name: ats-ssl
               readOnly: true
+            - mountPath: "/etc/ats/ssl/host-one"
+              name: host-one-ssl
+              readOnly: true
             - name: varlog
               mountPath: /opt/ats/var/log/trafficserver
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           env:
             - name: POD_NAME
               valueFrom:
@@ -63,12 +65,12 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-#            - name: INGRESS_CLASS
-#              value: "ats"
+            #- name: INGRESS_CLASS
+            #  value: "ats"
             - name: SNIPPET
               value: "1"
             - name: POD_TLS_PATH
-              value: "/etc/ats/ssl"
+              value: "/etc/ats/ssl:/etc/ats/ssl/host-one"
           ports:
           - containerPort: 8080
             name: http
@@ -93,6 +95,9 @@ spec:
         - name: ats-ssl
           secret:
             secretName: tls-secret
+        - name: host-one-ssl
+          secret:
+            secretName: host-secret
         - name: varlog
           emptyDir: {}
         - name: config-volume

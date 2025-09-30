@@ -78,7 +78,12 @@ func (h *AtsCacheHandler) Add(obj interface{}) {
 		log.Printf("Add: Failed to open cache.config: %v", err)
 		return
 	}
-	defer f.Close()
+
+	defer func() {
+		if err := f.Close(); err != nil {
+			log.Printf("failed to close file: %v", err)
+		}
+	}()
 
 	for _, line := range lines {
 		if _, err := f.WriteString(line + "\n"); err != nil {
@@ -107,7 +112,7 @@ func (h *AtsCacheHandler) Update(oldObj, newObj interface{}) {
 		return
 	}
 	lines := strings.Split(string(existingData), "\n")
-
+	var newlines []string
 	for _, rule := range newRules {
 		ruleMap, ok := rule.(map[string]interface{})
 		if !ok {
@@ -126,15 +131,21 @@ func (h *AtsCacheHandler) Update(oldObj, newObj interface{}) {
 		if !ok1 || !ok2 || !ok3 || !ok4 || action != "cache" {
 			continue
 		}
-
+		addline := false
 		for i, line := range lines {
 			if strings.Contains(line, fmt.Sprintf("%s=%s", typeval, pattern)) {
 				lines[i] = fmt.Sprintf("%s=%s ttl-in-cache=%s", typeval, pattern, newTTL)
+				addline = true
 				break
 			}
 		}
-	}
 
+		if !addline {
+			newline := fmt.Sprintf("%s=%s ttl-in-cache=%s", typeval, pattern, newTTL)
+			newlines = append(newlines, newline)
+		}
+	}
+	lines = append(lines, newlines...)
 	err = os.WriteFile(configPath, []byte(strings.Join(lines, "\n")), 0644)
 	if err != nil {
 		log.Printf("Update: Failed to write updated cache.config: %v", err)
@@ -161,7 +172,7 @@ func (h *AtsCacheHandler) Delete(obj interface{}) {
 		return
 	}
 
-	patternsToDelete := make(map[string]string)
+	patternsToDelete := []string{}
 	for _, rule := range rules {
 		ruleMap, ok := rule.(map[string]interface{})
 		if !ok {
@@ -175,17 +186,16 @@ func (h *AtsCacheHandler) Delete(obj interface{}) {
 		typeval, ok1 := primary["type"].(string)
 		pattern, ok2 := primary["pattern"].(string)
 		action, ok3 := ruleMap["action"].(string)
-
 		if ok1 && ok2 && ok3 && action == "cache" {
-			patternsToDelete[typeval] = pattern
+			patternsToDelete = append(patternsToDelete, fmt.Sprintf("%s=%s", typeval, pattern))
 		}
 	}
 
 	var updatedLines []string
 	for _, line := range lines {
 		shouldDelete := false
-		for typeval, pattern := range patternsToDelete {
-			if strings.Contains(line, fmt.Sprintf("%s=%s", typeval, pattern)) {
+		for _, pattern := range patternsToDelete {
+			if strings.Contains(line, pattern) {
 				shouldDelete = true
 				break
 			}

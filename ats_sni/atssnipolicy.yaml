@@ -1,0 +1,23 @@
+apiVersion: trafficserver.apache.org/v1alpha1
+kind: ATSSniPolicy
+metadata:
+  name: my-sni-config
+spec:
+  sni:
+    - fqdn: "ats.test.com"
+      host_sni_policy: "PERMISSIVE"
+      verify_server_policy: "PERMISSIVE"
+      http2: "off"
+      verify_client: "MODERATE"
+      valid_tls_versions_in:
+        - "TLSv1_2"
+        - "TLSv1_3"
+
+    - fqdn: "host-one.com"
+      host_sni_policy: "ENFORCED"
+      verify_server_policy: "PERMISSIVE"
+      http2: "on"
+      verify_client: "MODERATE"
+      valid_tls_versions_in:
+        - "TLSv1_2"
+        - "TLSv1_3"
