@@ -78,10 +78,12 @@ func TestAddSni(t *testing.T) {
 func TestUpdateSni(t *testing.T) {
 	h, tmpFile := newTestSniHandler(t)
 
+	// Start with two fqdn entries
 	oldObj := newSniConfig("my-sni-config", []string{"ats.test.com", "host-test.com"})
 	h.Add(oldObj)
 
-	newObj := newSniConfig("my-sni-config", []string{"ats.test.com"})
+	// Update CRD: Update ats.test.com, keep host-test.com and add new fqdn
+	newObj := newSniConfig("my-sni-config", []string{"ats.test.com", "new-host.com"})
 	h.Update(oldObj, newObj)
 
 	data, err := os.ReadFile(tmpFile)
@@ -89,18 +91,30 @@ func TestUpdateSni(t *testing.T) {
 		t.Fatalf("failed to read sni.yaml: %v", err)
 	}
 	content := string(data)
-	if contains(content, "host-test.com") {
-		t.Errorf("expected host-test.com to be removed, got: %s", content)
+
+	// host-test.com should remain
+	if !contains(content, "host-test.com") {
+		t.Errorf("host-test.com remain, got: %s", content)
 	}
+	// ats.test.com should remain
 	if !contains(content, "ats.test.com") {
 		t.Errorf("ats.test.com should remain, got: %s", content)
+	}
+	// new fqdn should be added
+	if !contains(content, "new-host.com") {
+		t.Errorf("new-host.com should be present, got: %s", content)
 	}
 }
 
 // TestDeleteSni verifies h.Delete() removes fqdn rules from sni.yaml
 func TestDeleteSni(t *testing.T) {
-	// --- DELETE (remove fqdns, expect file cleared but not deleted) ---
 	h, tmpFile := newTestSniHandler(t)
+
+	// Start with multiple fqdns
+	addObj := newSniConfig("my-sni-config", []string{"ats.test.com", "keep-me.com"})
+	h.Add(addObj)
+
+	// Delete CRD only containing ats.test.com
 	delObj := newSniConfig("my-sni-config", []string{"ats.test.com"})
 	h.Delete(delObj)
 
@@ -109,15 +123,32 @@ func TestDeleteSni(t *testing.T) {
 		t.Errorf("Delete: expected sni.yaml to exist, but it was deleted")
 	}
 
-	// File should be empty
+	// File should still contain keep-me.com but not ats.test.com
 	data, err := os.ReadFile(tmpFile)
+	if err != nil {
+		t.Fatalf("failed to read sni.yaml: %v", err)
+	}
+	content := string(data)
+
+	if contains(content, "ats.test.com") {
+		t.Errorf("Delete: ats.test.com should have been removed, got: %s", content)
+	}
+	if !contains(content, "keep-me.com") {
+		t.Errorf("Delete: keep-me.com should remain, got: %s", content)
+	}
+
+	// --- DELETE again to clear last fqdn ---
+	delObj2 := newSniConfig("my-sni-config", []string{"keep-me.com"})
+	h.Delete(delObj2)
+
+	// Now file should be empty
+	data, err = os.ReadFile(tmpFile)
 	if err != nil {
 		t.Fatalf("failed to read sni.yaml: %v", err)
 	}
 	if len(data) != 0 {
 		t.Errorf("Delete: expected sni.yaml to be empty, got:\n%s", string(data))
 	}
-
 }
 
 // TestLoadWriteSniFile verifies roundtrip of writeSniFile and loadSniFile

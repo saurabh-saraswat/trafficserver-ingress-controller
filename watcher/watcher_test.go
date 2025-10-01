@@ -734,23 +734,25 @@ func TestWatchAtsSniPolicy_Update(t *testing.T) {
 	}
 	dynClient := w.DynamicClient.Resource(gvr).Namespace("default")
 
-	// Create CR
+	// Create CR with fqdn
 	cr := newSniCR("policy-update", "ats.test.com")
 	_, err = dynClient.Create(context.TODO(), cr, meta_v1.CreateOptions{})
 	if err != nil {
 		t.Fatalf("failed to create SNI CR: %v", err)
 	}
 
-	// Update fqdn
+	// Update CR: keep ats.test.com, add new-site.com
 	cr.Object["spec"] = map[string]interface{}{
 		"sni": []interface{}{
+			map[string]interface{}{
+				"fqdn":            "ats.test.com",
+				"verify_client":   "NONE",
+				"host_sni_policy": "ENFORCE",
+			},
 			map[string]interface{}{
 				"fqdn":            "new-site.com",
 				"verify_client":   "NONE",
 				"host_sni_policy": "ENFORCE",
-				"valid_tls_versions_in": []interface{}{
-					"TLSv1_3",
-				},
 			},
 		},
 	}
@@ -760,14 +762,14 @@ func TestWatchAtsSniPolicy_Update(t *testing.T) {
 	}
 	time.Sleep(200 * time.Millisecond)
 
-	// File should contain new-site.com and not ats.test.com
+	// File should contain ats.test.com and new-site.com, but not host-test.com
 	data, _ := os.ReadFile(path)
 	content := string(data)
+	if !strings.Contains(content, "ats.test.com") {
+		t.Errorf("expected fqdn ats.test.com in sni.yaml after update, got:\n%s", content)
+	}
 	if !strings.Contains(content, "new-site.com") {
 		t.Errorf("expected fqdn new-site.com in sni.yaml after update, got:\n%s", content)
-	}
-	if strings.Contains(content, "ats.test.com") {
-		t.Errorf("did not expect old fqdn ats.test.com in sni.yaml after update, got:\n%s", content)
 	}
 }
 
@@ -787,8 +789,8 @@ func TestWatchAtsSniPolicy_Delete(t *testing.T) {
 	}
 	dynClient := w.DynamicClient.Resource(gvr).Namespace("default")
 
-	// Create CR
-	cr := newSniCR("policy-delete", "host-test.com")
+	// Create CR with fqdn
+	cr := newSniCR("policy-delete", "ats.test.com")
 	_, err = dynClient.Create(context.TODO(), cr, meta_v1.CreateOptions{})
 	if err != nil {
 		t.Fatalf("failed to create SNI CR: %v", err)
@@ -801,7 +803,7 @@ func TestWatchAtsSniPolicy_Delete(t *testing.T) {
 	}
 	time.Sleep(200 * time.Millisecond)
 
-	// File must be empty after delete
+	// File should be empty, because both fqdn entries came from the deleted CR
 	data, _ := os.ReadFile(path)
 	if len(strings.TrimSpace(string(data))) != 0 {
 		t.Errorf("expected sni.yaml to be empty after delete, got:\n%s", string(data))

@@ -77,11 +77,9 @@ func (h *AtsSniHandler) Add(obj interface{}) {
 
 // Update handles updates of TrafficServerSNIConfig
 func (h *AtsSniHandler) Update(oldObj, newObj interface{}) {
-	oldU := oldObj.(*unstructured.Unstructured)
 	newU := newObj.(*unstructured.Unstructured)
 	log.Printf("[UPDATE] TrafficServerSNIConfig: %s/%s", newU.GetNamespace(), newU.GetName())
 
-	oldSni, _, _ := unstructured.NestedSlice(oldU.Object, "spec", "sni")
 	newSni, found, err := unstructured.NestedSlice(newU.Object, "spec", "sni")
 	if err != nil || !found {
 		log.Printf("Update: sni not found or error: %v", err)
@@ -90,15 +88,7 @@ func (h *AtsSniHandler) Update(oldObj, newObj interface{}) {
 
 	sniFile := h.loadSniFile()
 
-	// Remove entries present in old but missing in new
-	oldMap := make(map[string]SniEntry)
-	for _, entry := range oldSni {
-		if m, ok := entry.(map[string]interface{}); ok {
-			if fqdn, ok := m["fqdn"].(string); ok && fqdn != "" {
-				oldMap[fqdn] = m
-			}
-		}
-	}
+	// Build a map for quick fqdn lookup from new object
 	newMap := make(map[string]SniEntry)
 	for _, entry := range newSni {
 		if m, ok := entry.(map[string]interface{}); ok {
@@ -108,52 +98,76 @@ func (h *AtsSniHandler) Update(oldObj, newObj interface{}) {
 		}
 	}
 
-	// Remove deleted fqdn entries
+	log.Println("New Updated map in Update function ", newMap)
 	var updatedSni []SniEntry
+	seen := make(map[string]struct{})
+
+	// Update existing file entries if fqdn matches
 	for _, existing := range sniFile.Sni {
-		fqdn := existing["fqdn"].(string)
-		if _, existsInOld := oldMap[fqdn]; existsInOld {
-			if _, existsInNew := newMap[fqdn]; !existsInNew {
-				continue // remove entry
-			}
+		fqdn, _ := existing["fqdn"].(string)
+		if newEntry, ok := newMap[fqdn]; ok {
+			// Update with new entry
+			updatedSni = append(updatedSni, newEntry)
+			seen[fqdn] = struct{}{}
+		} else {
+			// Keep old entry if not in new CRD
+			updatedSni = append(updatedSni, existing)
 		}
-		updatedSni = append(updatedSni, existing)
 	}
 
-	// Add/update new entries
+	log.Println("Update sni without adding new entries ", updatedSni)
+
+	// Add any new fqdn not already in the file
 	for fqdn, newEntry := range newMap {
-		found := false
-		for i, existing := range updatedSni {
-			if existingFqdn, _ := existing["fqdn"].(string); existingFqdn == fqdn {
-				if !reflect.DeepEqual(existing, newEntry) {
-					updatedSni[i] = newEntry
-				}
-				found = true
-				break
-			}
-		}
-		if !found {
+		if _, already := seen[fqdn]; !already {
 			updatedSni = append(updatedSni, newEntry)
 		}
 	}
+
+	log.Println("Updated sni with new entries ", updatedSni)
 
 	sniFile.Sni = updatedSni
 	h.writeSniFile(sniFile)
 	h.reloadSni()
 }
 
-// Delete handles deletion of TrafficServerSNIConfig
 func (h *AtsSniHandler) Delete(obj interface{}) {
 	u := obj.(*unstructured.Unstructured)
 	log.Printf("[DELETE] TrafficServerSNIConfig: %s/%s", u.GetNamespace(), u.GetName())
 
-	// Empty the file contents but do not delete the file
-	err := os.WriteFile(h.FilePath, []byte(""), 0644)
-	if err != nil {
-		log.Printf("failed to clear sni.yaml: %v", err)
+	sniFile := h.loadSniFile()
+
+	// Get fqdn list from deleted object
+	sniList, found, err := unstructured.NestedSlice(u.Object, "spec", "sni")
+	if err != nil || !found {
+		log.Printf("Delete: sni not found or error: %v", err)
+		return
 	}
 
-	// Trigger ATS reload
+	delMap := make(map[string]struct{})
+	for _, entry := range sniList {
+		if m, ok := entry.(map[string]interface{}); ok {
+			if fqdn, ok := m["fqdn"].(string); ok && fqdn != "" {
+				delMap[fqdn] = struct{}{}
+			}
+		}
+	}
+
+	log.Println("Entries to be deleted ", delMap)
+
+	// Keep only those not in delMap
+	var updatedSni []SniEntry
+	for _, existing := range sniFile.Sni {
+		fqdn, _ := existing["fqdn"].(string)
+		if _, toDelete := delMap[fqdn]; !toDelete {
+			log.Println("to not delete: ", existing)
+			updatedSni = append(updatedSni, existing)
+		}
+	}
+
+	log.Println("In delete final updated sni", updatedSni)
+	sniFile.Sni = updatedSni
+	h.writeSniFile(sniFile)
 	h.reloadSni()
 }
 
