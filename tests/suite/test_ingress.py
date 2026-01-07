@@ -538,7 +538,7 @@ class TestIngress:
         
         kubectl_apply('../ats_sni/verify-client/strict.yaml')
         time.sleep(7)
-        cmd = f'curl --cacert certs/rootCA.crt  -v --resolve test.edge.com:30443:{minikubeip} https://test.edge.com:30443/app2'
+        cmd = f'curl --cacert certs/rootCA.crt --tlsv1.2 -v --resolve test.edge.com:30443:{minikubeip} https://test.edge.com:30443/app2'
         result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
         assert result.returncode != 0, "Curl unexpectedly succeeded without client certificate"
         expected_error = "tlsv13 alert certificate required"
